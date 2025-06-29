@@ -3,6 +3,7 @@ from getpass import getpass
 import subprocess as sp
 from sys import platform
 import logging,os
+import time
 # %%
 try:
     sp.check_call(('ffmpeg','-h'), stdout=sp.DEVNULL, stderr=sp.DEVNULL)
@@ -54,6 +55,10 @@ br60 = {'2160':20000,
 
 COMPPRESET='veryfast'
 
+# Global variables for best encoder
+BEST_ENCODER = None
+BEST_ENCODER_PRESET = None
+
 # %% video
 def _videostream(P:dict) -> tuple:
     """optimizes video settings for YouTube Live"""
@@ -69,12 +74,15 @@ def _videostream(P:dict) -> tuple:
 # %% configure video output
     cvbr = _bitrate(P)
 
-    vid2 = ['-c:v','libx264','-pix_fmt','yuv420p']
+    # Get the best available encoder
+    best_encoder, best_preset = _find_best_encoder()
+    
+    vid2 = ['-c:v', best_encoder, '-pix_fmt', 'yuv420p']
 
     if 'image' in P and P['image']:
         vid2 += ['-tune','stillimage']
     else:
-        vid2 += ['-preset',COMPPRESET,
+        vid2 += best_preset + [
                 '-b:v',str(cvbr)+'k',
                 '-g',_group(P)]
 
@@ -194,9 +202,107 @@ def _buffer(P:dict,cvbr:int) -> list:
 
     return buf
 
+
+def _detect_available_encoders():
+    """Detect available H.264 encoders on the system"""
+    try:
+        if platform.startswith('win'):
+            result = sp.run([FFMPEG, '-encoders'], capture_output=True, text=True)
+            encoders = []
+            for line in result.stdout.split('\n'):
+                if 'h264' in line.lower():
+                    encoders.append(line.strip())
+        else:
+            result = sp.run([FFMPEG, '-encoders'], capture_output=True, text=True)
+            encoders = []
+            for line in result.stdout.split('\n'):
+                if 'h264' in line.lower():
+                    encoders.append(line.strip())
+        return encoders
+    except Exception as e:
+        logging.warning(f"Could not detect available encoders: {e}")
+        return []
+
+
+def _test_encoder_performance(encoder, preset_args):
+    """Test encoder performance with a 10-second test video"""
+    test_cmd = [
+        FFMPEG, '-f', 'lavfi', '-i', 'testsrc=duration=10:size=1920x1080:rate=30',
+        '-c:v', encoder
+    ] + preset_args + [
+        '-b:v', '3000k', '-f', 'null', '-'
+    ]
+    
+    try:
+        start_time = time.time()
+        result = sp.run(test_cmd, capture_output=True, text=True, timeout=30)
+        end_time = time.time()
+        
+        if result.returncode == 0:
+            encode_time = end_time - start_time
+            logging.info(f"Encoder {encoder} completed test in {encode_time:.2f}s")
+            return encode_time
+        else:
+            logging.warning(f"Encoder {encoder} failed test: {result.stderr}")
+            return None
+    except sp.TimeoutExpired:
+        logging.warning(f"Encoder {encoder} test timed out")
+        return None
+    except Exception as e:
+        logging.warning(f"Error testing encoder {encoder}: {e}")
+        return None
+
+
+def _find_best_encoder():
+    """Find and test the best available GPU encoder"""
+    global BEST_ENCODER, BEST_ENCODER_PRESET
+    
+    if BEST_ENCODER is not None:
+        return BEST_ENCODER, BEST_ENCODER_PRESET
+    
+    # Define encoder priorities and their settings
+    encoders_to_test = [
+        ('h264_nvenc', ['-preset', 'fast']),           # NVIDIA GPU
+        ('h264_amf', ['-usage', 'ultralowlatency']),   # AMD GPU  
+        ('h264_qsv', ['-preset', 'fast']),             # Intel GPU
+        ('h264_videotoolbox', ['-preset', 'fast']),    # macOS hardware
+        ('libx264', ['-preset', 'veryfast'])           # CPU fallback
+    ]
+    
+    best_encoder = 'libx264'
+    best_preset = ['-preset', 'veryfast']
+    best_time = float('inf')
+    
+    logging.info("Testing available encoders for best performance...")
+    
+    for encoder, preset_args in encoders_to_test:
+        logging.info(f"Testing encoder: {encoder}")
+        encode_time = _test_encoder_performance(encoder, preset_args)
+        
+        if encode_time is not None and encode_time < best_time:
+            best_time = encode_time
+            best_encoder = encoder
+            best_preset = preset_args
+            logging.info(f"New best encoder: {encoder} ({encode_time:.2f}s)")
+    
+    # Cache the result
+    BEST_ENCODER = best_encoder
+    BEST_ENCODER_PRESET = best_preset
+    
+    if best_encoder != 'libx264':
+        logging.info(f"Using GPU encoder: {best_encoder}")
+    else:
+        logging.info("Using CPU encoder: libx264 (no GPU encoder available)")
+    
+    return best_encoder, best_preset
+
 # %% top-level
 def youtubelive(P:dict):
     """LIVE STREAM to YouTube Live"""
+    
+    # Enable logging if requested
+    if P.get('verbose', False):
+        logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
     vid1,vid2,cvbr = _videostream(P)
 
@@ -207,6 +313,13 @@ def youtubelive(P:dict):
 
     cmd = [FFMPEG] + vid1 + aud1 + vid2 + aud2 + buf
 
+    # Show which encoder is being used
+    encoder_info = f"Using encoder: {BEST_ENCODER}"
+    if BEST_ENCODER != 'libx264':
+        encoder_info += " (GPU accelerated)"
+    else:
+        encoder_info += " (CPU)"
+    print(f"\n{encoder_info}")
     print('\n',' '.join(cmd),'\n')
 
     if 'streamid' in P: # for loop case

@@ -32,6 +32,7 @@ if __name__ == '__main__':
     p.add_argument('-res',default='1024x720')
     p.add_argument('-o','--origin',help='x,y coordinates of upper-left hand capture area (pixel)',
                    nargs=2,type=int,default=[0,0])
+    p.add_argument('-v', '--verbose', action='store_true', help='Enable verbose logging to see encoder selection process')
     p = p.parse_args()
 
     P = {'fps': p.fps,
@@ -40,6 +41,7 @@ if __name__ == '__main__':
          'videochan': videochan,
          'audiochan': audiochan,
          'vidsource': 'screen',
+         'verbose': p.verbose,
             }
 
     youtubelive(P)

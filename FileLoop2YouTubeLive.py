@@ -14,11 +14,13 @@ if __name__ == '__main__':
     from argparse import ArgumentParser
     p = ArgumentParser()
     p.add_argument('filein',help='file to loop endlessly to YouTube Live.  Keep in mind copyright and TOS!')
+    p.add_argument('-v', '--verbose', action='store_true', help='Enable verbose logging to see encoder selection process')
     p = p.parse_args()
 
     P = {'filein': p.filein,
          'vidsource': 'file',
          'loop':True,
+         'verbose': p.verbose,
             }
 
     youtubelive(P)

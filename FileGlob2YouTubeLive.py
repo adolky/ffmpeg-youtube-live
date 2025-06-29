@@ -27,6 +27,7 @@ if __name__ == '__main__':
     p.add_argument('glob',help='file glob pattern for YouTube Live.  Keep in mind copyright and TOS!')
     p.add_argument('-image',help='static image to display, typically used for audio-only files.')
     p.add_argument('-loop',help='repeat the globbed file list endlessly',action='store_true')
+    p.add_argument('-v', '--verbose', action='store_true', help='Enable verbose logging to see encoder selection process')
     p = p.parse_args()
 
     path = Path(p.path).expanduser()
@@ -41,6 +42,7 @@ if __name__ == '__main__':
     P = {'vidsource': 'file',
          'image':p.image,
          'streamid':getpass('YouTube Live Stream ID: '),
+         'verbose': p.verbose,
          }
 
     if p.loop:

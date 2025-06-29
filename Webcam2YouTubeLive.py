@@ -28,12 +28,14 @@ if __name__ == '__main__':
     from argparse import ArgumentParser
     p = ArgumentParser()
     p.add_argument('-fps',default=30, type=int)
+    p.add_argument('-v', '--verbose', action='store_true', help='Enable verbose logging to see encoder selection process')
     p = p.parse_args()
 
     P = {'fps': p.fps,
          'audiochan': audiochan,
          'videochan': videochan,
          'vidsource': 'camera',
+         'verbose': p.verbose,
             }
 
     youtubelive(P)
